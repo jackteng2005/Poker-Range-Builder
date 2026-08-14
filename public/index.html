@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Preflop Range Manager</title>
+  <link rel="icon" type="image/x-icon" href="/app-icon.ico">
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+
+  <!-- Depth selection screen -->
+  <section id="depth-screen" class="depth-screen">
+    <div class="depth-screen__inner">
+      <div class="brand">
+        <span class="brand__mark">♠</span>
+        <span class="brand__name">Range Vault</span>
+      </div>
+      <h1>Name a stack depth</h1>
+      <p class="muted">Each depth keeps its own set of preflop spots and saved ranges. Enter anything — a stack size, a stage, a game type.</p>
+
+      <form id="custom-depth-form" class="depth-form">
+        <input
+          id="custom-depth-input"
+          class="depth-input"
+          type="text"
+          maxlength="40"
+          placeholder="e.g. 50bb, 75bb, 20bb Bubble, PKO Late"
+          autocomplete="off"
+        />
+        <button type="submit" class="btn btn--primary">Enter Vault</button>
+      </form>
+      <p id="custom-depth-error" class="depth-error hidden"></p>
+
+      <div id="other-depths" class="other-depths hidden">
+        <div class="other-depths__label">Your Vaults</div>
+        <div id="other-depths-list" class="other-depths__list"></div>
+      </div>
+
+      <p class="muted small">You can switch depth anytime from the top bar.</p>
+    </div>
+  </section>
+
+  <!-- Main app -->
+  <div id="app" class="app hidden">
+    <header class="topbar">
+      <div class="topbar__left">
+        <span class="brand__mark small">♠</span>
+        <span class="brand__name">Range Vault</span>
+        <span class="depth-pill" id="depth-pill">50bb</span>
+      </div>
+      <div class="topbar__right">
+        <button id="switch-depth-btn" class="btn btn--ghost">Switch Depth</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <aside class="sidebar">
+        <div class="sidebar__header">
+          <span>Preflop Spots</span>
+          <div class="sidebar__actions">
+            <button id="expand-all-btn" class="link-btn" title="Expand all">Expand</button>
+            <button id="collapse-all-btn" class="link-btn" title="Collapse all">Collapse</button>
+          </div>
+        </div>
+        <div id="tree-root" class="tree"></div>
+      </aside>
+
+      <main class="content">
+        <div id="empty-state" class="empty-state">
+          <div class="empty-state__icon">◇</div>
+          <h2>Select a spot</h2>
+          <p class="muted">Pick a node from the tree on the left to view or build its range.</p>
+        </div>
+
+        <div id="editor" class="editor hidden">
+          <div class="editor__inner">
+            <div class="editor__header">
+              <div>
+                <div class="breadcrumb" id="breadcrumb"></div>
+                <h2 id="spot-title"></h2>
+              </div>
+              <div class="editor__actions">
+                <span class="hand-count" id="hand-count">0 combos</span>
+                <button id="smart-cover-btn" class="btn btn--ghost btn--toggle" title="While on, dragging over a hand also fills every stronger hand above it in that column">Smart Cover</button>
+                <button id="clear-btn" class="btn btn--ghost">Clear</button>
+                <button id="save-btn" class="btn btn--primary">Save Range</button>
+              </div>
+            </div>
+
+            <div id="action-toolbar" class="action-toolbar hidden"></div>
+
+            <div class="grid-wrap">
+              <div id="hand-grid" class="hand-grid"></div>
+            </div>
+
+            <div class="editor__footer">
+              <span id="save-status" class="save-status"></span>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
