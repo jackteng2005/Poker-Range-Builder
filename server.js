@@ -2,9 +2,17 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 
-const PORT = 5173;
-const DATA_FILE = path.join(__dirname, 'data', 'ranges.json');
+const PORT = Number(process.env.RANGE_VAULT_PORT) || 5173;
+const DATA_FILE = process.env.RANGE_VAULT_DATA_FILE || path.join(__dirname, 'data', 'ranges.json');
 const PUBLIC_DIR = path.join(__dirname, 'public');
+
+// SB R and SB C are two ways of viewing the same small-blind range. Keep
+// their persisted hand selections identical regardless of which view saves.
+const SYNCHRONIZED_SPOT_GROUPS = [['SB-RFI', 'SB-Limp']];
+
+function synchronizedSpotIds(spotId) {
+  return SYNCHRONIZED_SPOT_GROUPS.find((group) => group.includes(spotId)) || [spotId];
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -103,8 +111,8 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  // Registers a vault immediately on creation, even before it has any saved
-  // spots, so it persists to disk and shows up in "Your Vaults" right away.
+  // Registers a preflop collection immediately on creation, even before it
+  // has saved spots, so it persists to disk and appears in the saved list.
   if (depthMatch && req.method === 'POST') {
     const depth = decodeURIComponent(depthMatch[1]);
     const store = readStore();
@@ -127,13 +135,22 @@ const server = http.createServer(async (req, res) => {
         const store = readStore();
         if (!store[depth]) store[depth] = {};
         const hands = body.hands || {};
-        if (Object.keys(hands).length === 0) {
-          delete store[depth][spotId];
-        } else {
-          store[depth][spotId] = { hands, updatedAt: new Date().toISOString() };
+        const linkedSpotIds = synchronizedSpotIds(spotId);
+        const spot = Object.keys(hands).length === 0
+          ? null
+          : { hands, updatedAt: new Date().toISOString() };
+        for (const linkedSpotId of linkedSpotIds) {
+          if (spot) store[depth][linkedSpotId] = spot;
+          else delete store[depth][linkedSpotId];
         }
         await writeStore(store);
-        sendJson(res, 200, { ok: true, spot: store[depth][spotId] || null });
+        sendJson(res, 200, {
+          ok: true,
+          spot: store[depth][spotId] || null,
+          synchronizedSpots: Object.fromEntries(
+            linkedSpotIds.map((linkedSpotId) => [linkedSpotId, store[depth][linkedSpotId] || null])
+          ),
+        });
       } catch (e) {
         sendJson(res, 400, { ok: false, error: e.message });
       }
@@ -142,7 +159,11 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'DELETE') {
       const store = readStore();
-      if (store[depth]) delete store[depth][spotId];
+      if (store[depth]) {
+        for (const linkedSpotId of synchronizedSpotIds(spotId)) {
+          delete store[depth][linkedSpotId];
+        }
+      }
       await writeStore(store);
       sendJson(res, 200, { ok: true });
       return;

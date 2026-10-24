@@ -47,7 +47,8 @@ const el = {
   actionToolbar: document.getElementById('action-toolbar'),
   handCount: document.getElementById('hand-count'),
   saveStatus: document.getElementById('save-status'),
-  saveBtn: document.getElementById('save-btn'),
+  copyBtn: document.getElementById('copy-btn'),
+  pasteBtn: document.getElementById('paste-btn'),
   clearBtn: document.getElementById('clear-btn'),
   smartCoverBtn: document.getElementById('smart-cover-btn'),
   switchDepthBtn: document.getElementById('switch-depth-btn'),
@@ -164,6 +165,31 @@ function nodeHasSavedRange(nodeId) {
   return !!(bucket && bucket[nodeId] && Object.keys(bucket[nodeId].hands || {}).length > 0);
 }
 
+function supportsActions(node) {
+  return Array.isArray(node?.actions) && node.actions.length > 0;
+}
+
+// Older saves used true for selected hands on single-action pages. Convert
+// those values on load so existing work remains meaningful in the unified
+// Allin / Raise / Call editor.
+function legacyActionForNode(node) {
+  const actionCode = node.label.split(' ').pop();
+  if (actionCode === 'C') return 'call';
+  if (actionCode === '5B') return 'allin';
+  return 'raise';
+}
+
+function normalizeHandsForNode(hands, node) {
+  if (!supportsActions(node)) return { ...hands };
+  const normalized = {};
+  const fallbackAction = legacyActionForNode(node);
+  for (const [hand, value] of Object.entries(hands)) {
+    if (typeof value === 'string') normalized[hand] = value;
+    else if (value) normalized[hand] = fallbackAction;
+  }
+  return normalized;
+}
+
 // ---------- Tree rendering ----------
 function renderTree() {
   el.treeRoot.innerHTML = '';
@@ -247,7 +273,7 @@ function selectNode(nodeId) {
   state.selectedNodeId = nodeId;
   const node = state.nodeMap.get(nodeId);
   const saved = state.store[state.depth]?.[nodeId]?.hands || {};
-  state.currentHands = { ...saved };
+  state.currentHands = normalizeHandsForNode(saved, node);
   state.dirty = false;
 
   el.emptyState.classList.add('hidden');
@@ -256,16 +282,16 @@ function selectNode(nodeId) {
   renderBreadcrumb(nodeId);
   el.spotTitle.textContent = node.label;
 
-  const isFacingOpen = node.kind === 'facing-open';
-  el.actionToolbar.classList.toggle('hidden', !isFacingOpen);
-  el.handCount.classList.toggle('hidden', isFacingOpen);
-  if (isFacingOpen) {
+  const isActionSpot = supportsActions(node);
+  el.actionToolbar.classList.toggle('hidden', !isActionSpot);
+  el.handCount.classList.toggle('hidden', isActionSpot);
+  if (isActionSpot) {
     if (!state.paintAction || state.paintAction === 'fold') state.paintAction = 'call';
     renderActionToolbar();
   }
 
   renderHandGrid();
-  if (isFacingOpen) updateFacingStats();
+  if (isActionSpot) updateFacingStats();
   else updateHandCount();
   setSaveStatus('idle');
   renderTree();
@@ -297,8 +323,8 @@ function renderHandGrid() {
   el.handGrid.innerHTML = '';
   handCellDivs = new Map();
   const node = state.nodeMap.get(state.selectedNodeId);
-  const isFacingOpen = node.kind === 'facing-open';
-  const color = isFacingOpen ? null : accentColor(node.label);
+  const isActionSpot = supportsActions(node);
+  const color = isActionSpot ? null : accentColor(node.label);
 
   for (const row of HAND_MATRIX) {
     for (const cell of row) {
@@ -308,12 +334,12 @@ function renderHandGrid() {
       div.dataset.hand = cell.hand;
       handCellDivs.set(cell.hand, div);
 
-      if (isFacingOpen) applyFacingCellState(div);
+      if (isActionSpot) applyFacingCellState(div);
       else applyCellState(div, color);
 
       div.addEventListener('mousedown', (e) => {
         e.preventDefault();
-        if (isFacingOpen) {
+        if (isActionSpot) {
           const current = state.currentHands[cell.hand];
           const paint = state.paintAction;
           const nextValue = paint === 'fold' ? undefined : current === paint ? undefined : paint;
@@ -329,7 +355,7 @@ function renderHandGrid() {
       });
       div.addEventListener('mouseenter', () => {
         if (!paintState.active) return;
-        if (isFacingOpen) paintHand(cell.hand, (h) => setFacingHandAction(h, paintState.facingValue, handCellDivs.get(h)));
+        if (isActionSpot) paintHand(cell.hand, (h) => setFacingHandAction(h, paintState.facingValue, handCellDivs.get(h)));
         else paintHand(cell.hand, (h) => setHandIncluded(h, paintState.value, handCellDivs.get(h), color));
       });
 
@@ -372,6 +398,7 @@ function setHandIncluded(hand, included, div, color) {
 
 const paintState = { active: false, value: true };
 window.addEventListener('mouseup', () => {
+  if (paintState.active && state.dirty) saveCurrentSpot();
   paintState.active = false;
 });
 
@@ -392,44 +419,61 @@ function markDirty() {
 }
 
 function setSaveStatus(mode) {
-  el.saveStatus.classList.remove('dirty', 'saved');
+  el.saveStatus.classList.remove('dirty', 'saving', 'saved', 'error');
   if (mode === 'dirty') {
     el.saveStatus.textContent = 'Unsaved changes';
     el.saveStatus.classList.add('dirty');
+  } else if (mode === 'saving') {
+    el.saveStatus.textContent = 'Saving…';
+    el.saveStatus.classList.add('saving');
   } else if (mode === 'saved') {
     const t = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     el.saveStatus.textContent = `Saved at ${t}`;
     el.saveStatus.classList.add('saved');
+  } else if (mode === 'error') {
+    el.saveStatus.textContent = 'Could not save — will retry on next change';
+    el.saveStatus.classList.add('error');
   } else {
     el.saveStatus.textContent = '';
   }
 }
 
+// Snapshots depth/node/hands at call time (rather than reading state.* once
+// the fetch resolves) so a save that's still in flight can't get attributed
+// to whatever spot the user has since navigated to.
 async function saveCurrentSpot() {
   if (!state.selectedNodeId) return;
-  el.saveBtn.disabled = true;
-  el.saveBtn.textContent = 'Saving…';
+  const depth = state.depth;
+  const nodeId = state.selectedNodeId;
+  const hands = { ...state.currentHands };
+  state.dirty = false;
+  setSaveStatus('saving');
   try {
-    const res = await fetch(`/api/ranges/${encodeURIComponent(state.depth)}/${encodeURIComponent(state.selectedNodeId)}`, {
+    const res = await fetch(`/api/ranges/${encodeURIComponent(depth)}/${encodeURIComponent(nodeId)}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ hands: state.currentHands }),
+      body: JSON.stringify({ hands }),
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.error || 'Save failed');
 
-    if (!state.store[state.depth]) state.store[state.depth] = {};
-    if (data.spot) state.store[state.depth][state.selectedNodeId] = data.spot;
-    else delete state.store[state.depth][state.selectedNodeId];
+    if (!state.store[depth]) state.store[depth] = {};
+    const savedSpots = data.synchronizedSpots || { [nodeId]: data.spot || null };
+    for (const [savedNodeId, savedSpot] of Object.entries(savedSpots)) {
+      if (savedSpot) state.store[depth][savedNodeId] = savedSpot;
+      else delete state.store[depth][savedNodeId];
+    }
 
-    state.dirty = false;
     setSaveStatus('saved');
     renderTree();
   } catch (err) {
-    alert('Could not save range: ' + err.message);
-  } finally {
-    el.saveBtn.disabled = false;
-    el.saveBtn.textContent = 'Save Range';
+    console.error('Could not save range:', err);
+    // Only re-flag dirty if the user is still on the spot that failed to
+    // save — otherwise this stale failure shouldn't block navigation.
+    if (state.selectedNodeId === nodeId && state.depth === depth) {
+      state.dirty = true;
+    }
+    setSaveStatus('error');
   }
 }
 
@@ -439,9 +483,65 @@ function clearCurrentSpot() {
   state.currentHands = {};
   const node = state.nodeMap.get(state.selectedNodeId);
   renderHandGrid();
-  if (node.kind === 'facing-open') updateFacingStats();
+  if (supportsActions(node)) updateFacingStats();
   else updateHandCount();
   markDirty();
+  saveCurrentSpot();
+}
+
+// ---------- Copy / paste a range between spots ----------
+// Holds a snapshot of one spot's hands plus whether it came from a
+// facing-open (multi-action) spot, so paste can translate sensibly when
+// copying between a facing-open spot and a single-action one.
+let clipboard = null;
+
+function copyCurrentSpot() {
+  if (!state.selectedNodeId) return;
+  if (Object.keys(state.currentHands).length === 0) return;
+  const node = state.nodeMap.get(state.selectedNodeId);
+  clipboard = {
+    hands: { ...state.currentHands },
+    isActionSpot: supportsActions(node),
+    sourceLabel: node.label,
+  };
+  el.pasteBtn.disabled = false;
+  el.pasteBtn.title = `Paste "${node.label}" (${Object.keys(clipboard.hands).length} hands)`;
+}
+
+function pasteToCurrentSpot() {
+  if (!clipboard || !state.selectedNodeId) return;
+  if (
+    Object.keys(state.currentHands).length > 0 &&
+    !confirm(`Replace this spot's range with the copied one from "${clipboard.sourceLabel}"?`)
+  ) return;
+
+  const node = state.nodeMap.get(state.selectedNodeId);
+  const isActionSpot = supportsActions(node);
+  const newHands = {};
+
+  for (const [hand, value] of Object.entries(clipboard.hands)) {
+    if (isActionSpot) {
+      if (clipboard.isActionSpot) {
+        newHands[hand] = value; // already an action key
+      } else if (value) {
+        // Source was a single-action spot: fall back to whatever action is
+        // currently selected in the toolbar (or Call) since there's no
+        // per-hand action to carry over.
+        newHands[hand] = state.paintAction && state.paintAction !== 'fold' ? state.paintAction : 'call';
+      }
+    } else if (clipboard.isActionSpot) {
+      if (value && value !== 'fold') newHands[hand] = true;
+    } else if (value) {
+      newHands[hand] = true;
+    }
+  }
+
+  state.currentHands = newHands;
+  renderHandGrid();
+  if (isActionSpot) updateFacingStats();
+  else updateHandCount();
+  markDirty();
+  saveCurrentSpot();
 }
 
 // ---------- Depth flow ----------
@@ -453,8 +553,8 @@ async function chooseDepth(depth) {
   state.selectedNodeId = null;
   state.expanded.clear();
 
-  // Registers the vault on disk immediately, even if no spot gets saved in
-  // it yet, so it survives a reload and shows up under "Your Vaults".
+  // Registers the preflop collection on disk immediately, even if no spot
+  // gets saved in it yet, so it survives a reload and appears in the list.
   await fetch(`/api/ranges/${encodeURIComponent(depth)}`, { method: 'POST' });
   await fetchStore();
 
@@ -532,7 +632,7 @@ async function refreshOtherDepths() {
 }
 
 async function deleteDepth(depth) {
-  if (!confirm(`Delete the "${depth}" vault and all its saved ranges? This can't be undone.`)) return;
+  if (!confirm(`Delete the "${depth}" saved preflop range and all its spots? This can't be undone.`)) return;
   await fetch(`/api/ranges/${encodeURIComponent(depth)}`, { method: 'DELETE' });
   refreshOtherDepths();
 }
@@ -553,14 +653,8 @@ el.smartCoverBtn.addEventListener('click', () => {
 });
 
 el.switchDepthBtn.addEventListener('click', showDepthScreen);
-el.saveBtn.addEventListener('click', saveCurrentSpot);
+el.copyBtn.addEventListener('click', copyCurrentSpot);
+el.pasteBtn.addEventListener('click', pasteToCurrentSpot);
 el.clearBtn.addEventListener('click', clearCurrentSpot);
 el.expandAllBtn.addEventListener('click', () => setAllExpanded(true));
 el.collapseAllBtn.addEventListener('click', () => setAllExpanded(false));
-
-document.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-    e.preventDefault();
-    if (!el.editor.classList.contains('hidden')) saveCurrentSpot();
-  }
-});

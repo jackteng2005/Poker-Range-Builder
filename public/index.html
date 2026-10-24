@@ -14,7 +14,7 @@
     <div class="depth-screen__inner">
       <div class="brand">
         <span class="brand__mark">♠</span>
-        <span class="brand__name">Range Vault</span>
+        <span class="brand__name">Preflop Range Manager</span>
       </div>
       <h1>Name a stack depth</h1>
       <p class="muted">Each depth keeps its own set of preflop spots and saved ranges. Enter anything — a stack size, a stage, a game type.</p>
@@ -28,12 +28,12 @@
           placeholder="e.g. 50bb, 75bb, 20bb Bubble, PKO Late"
           autocomplete="off"
         />
-        <button type="submit" class="btn btn--primary">Enter Vault</button>
+        <button type="submit" class="btn btn--primary">Open Preflop</button>
       </form>
       <p id="custom-depth-error" class="depth-error hidden"></p>
 
       <div id="other-depths" class="other-depths hidden">
-        <div class="other-depths__label">Your Vaults</div>
+        <div class="other-depths__label">Your Saved Preflop Ranges</div>
         <div id="other-depths-list" class="other-depths__list"></div>
       </div>
 
@@ -46,7 +46,7 @@
     <header class="topbar">
       <div class="topbar__left">
         <span class="brand__mark small">♠</span>
-        <span class="brand__name">Range Vault</span>
+        <span class="brand__name">Preflop Range Manager</span>
         <span class="depth-pill" id="depth-pill">50bb</span>
       </div>
       <div class="topbar__right">
@@ -83,8 +83,9 @@
               <div class="editor__actions">
                 <span class="hand-count" id="hand-count">0 combos</span>
                 <button id="smart-cover-btn" class="btn btn--ghost btn--toggle" title="While on, dragging over a hand also fills every stronger hand above it in that column">Smart Cover</button>
+                <button id="copy-btn" class="btn btn--ghost" title="Copy this spot's range">Copy</button>
+                <button id="paste-btn" class="btn btn--ghost" disabled title="Copy a range first">Paste</button>
                 <button id="clear-btn" class="btn btn--ghost">Clear</button>
-                <button id="save-btn" class="btn btn--primary">Save Range</button>
               </div>
             </div>
 

@@ -8,6 +8,7 @@ export const POSITIONS = ['UTG', 'UTG+1', 'LJ', 'HJ', 'CO', 'BTN', 'SB', 'BB'];
 // Terse HRC-style action codes: R = raise/open, 3B/4B/5B = re-raise levels, C = call.
 const RAISE_LABEL = ['R', '3B', '4B', '5B'];
 const MAX_RAISE_LEVEL = 3; // index into RAISE_LABEL: 0=open,1=3bet,2=4bet,3=5bet(shove, no further raise)
+const SPOT_ACTIONS = ['allin', 'raise', 'call'];
 
 function positionsAfter(pos) {
   const idx = POSITIONS.indexOf(pos);
@@ -22,6 +23,7 @@ function buildRaiseNode(raiser, facingPositions, level, idPrefix) {
     label: `${raiser} ${RAISE_LABEL[level]}`,
     position: raiser,
     kind: 'spot', // always has its own range chart
+    actions: SPOT_ACTIONS,
     seq: nodeCounter++,
     children: [],
   };
@@ -41,7 +43,7 @@ function buildRaiseNode(raiser, facingPositions, level, idPrefix) {
         label: `${responder} vs Open`,
         position: responder,
         kind: 'facing-open', // combined Allin/Raise/Call/Fold strategy chart
-        actions: ['allin', 'raise', 'call'],
+        actions: SPOT_ACTIONS,
         seq: nodeCounter++,
         children: raiseSubtree.children,
       });
@@ -57,6 +59,7 @@ function buildRaiseNode(raiser, facingPositions, level, idPrefix) {
         label: `${responder} C`,
         position: responder,
         kind: 'spot',
+        actions: SPOT_ACTIONS,
         seq: nodeCounter++,
         children: [],
       });
@@ -73,6 +76,7 @@ function buildRaiseNode(raiser, facingPositions, level, idPrefix) {
         label: `${responder} C`,
         position: responder,
         kind: 'spot',
+        actions: SPOT_ACTIONS,
         seq: nodeCounter++,
         children: [],
       });
@@ -97,6 +101,7 @@ export function buildTree() {
         label: 'SB C',
         position: 'SB',
         kind: 'spot',
+        actions: SPOT_ACTIONS,
         seq: nodeCounter++,
         children: [
           {
@@ -104,6 +109,7 @@ export function buildTree() {
             label: 'BB R',
             position: 'BB',
             kind: 'spot',
+            actions: SPOT_ACTIONS,
             seq: nodeCounter++,
             children: [
               {
@@ -111,7 +117,7 @@ export function buildTree() {
                 label: 'SB vs Open',
                 position: 'SB',
                 kind: 'facing-open',
-                actions: ['allin', 'raise', 'call'],
+                actions: SPOT_ACTIONS,
                 seq: nodeCounter++,
                 children: [],
               },
