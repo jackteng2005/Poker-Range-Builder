@@ -23,7 +23,8 @@ const MIME = {
   '.ico': 'image/x-icon',
 };
 
-// Serialize all writes so concurrent saves can't corrupt the file.
+// Serialize every read-modify-write through one queue, so concurrent saves
+// each see the previous save's result instead of overwriting each other.
 let writeQueue = Promise.resolve();
 function readStore() {
   try {
@@ -32,11 +33,16 @@ function readStore() {
     return { '50bb': {}, '100bb': {} };
   }
 }
-function writeStore(store) {
-  writeQueue = writeQueue.then(
-    () => fs.promises.writeFile(DATA_FILE, JSON.stringify(store, null, 2), 'utf8')
-  );
-  return writeQueue;
+function updateStore(mutate) {
+  const run = writeQueue.then(async () => {
+    const store = readStore();
+    const result = mutate(store);
+    await fs.promises.writeFile(DATA_FILE, JSON.stringify(store, null, 2), 'utf8');
+    return result;
+  });
+  // A failed write shouldn't block every later save.
+  writeQueue = run.catch(() => {});
+  return run;
 }
 
 function sendJson(res, status, obj) {
@@ -104,9 +110,9 @@ const server = http.createServer(async (req, res) => {
   const depthMatch = pathname.match(/^\/api\/ranges\/([^/]+)$/);
   if (depthMatch && req.method === 'DELETE') {
     const depth = decodeURIComponent(depthMatch[1]);
-    const store = readStore();
-    delete store[depth];
-    await writeStore(store);
+    await updateStore((store) => {
+      delete store[depth];
+    });
     sendJson(res, 200, { ok: true });
     return;
   }
@@ -115,11 +121,9 @@ const server = http.createServer(async (req, res) => {
   // has saved spots, so it persists to disk and appears in the saved list.
   if (depthMatch && req.method === 'POST') {
     const depth = decodeURIComponent(depthMatch[1]);
-    const store = readStore();
-    if (!store[depth]) {
-      store[depth] = {};
-      await writeStore(store);
-    }
+    await updateStore((store) => {
+      if (!store[depth]) store[depth] = {};
+    });
     sendJson(res, 200, { ok: true });
     return;
   }
@@ -132,25 +136,26 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'PUT') {
       try {
         const body = await readBody(req);
-        const store = readStore();
-        if (!store[depth]) store[depth] = {};
         const hands = body.hands || {};
         const linkedSpotIds = synchronizedSpotIds(spotId);
         const spot = Object.keys(hands).length === 0
           ? null
           : { hands, updatedAt: new Date().toISOString() };
-        for (const linkedSpotId of linkedSpotIds) {
-          if (spot) store[depth][linkedSpotId] = spot;
-          else delete store[depth][linkedSpotId];
-        }
-        await writeStore(store);
-        sendJson(res, 200, {
-          ok: true,
-          spot: store[depth][spotId] || null,
-          synchronizedSpots: Object.fromEntries(
-            linkedSpotIds.map((linkedSpotId) => [linkedSpotId, store[depth][linkedSpotId] || null])
-          ),
+        const response = await updateStore((store) => {
+          if (!store[depth]) store[depth] = {};
+          for (const linkedSpotId of linkedSpotIds) {
+            if (spot) store[depth][linkedSpotId] = spot;
+            else delete store[depth][linkedSpotId];
+          }
+          return {
+            ok: true,
+            spot: store[depth][spotId] || null,
+            synchronizedSpots: Object.fromEntries(
+              linkedSpotIds.map((linkedSpotId) => [linkedSpotId, store[depth][linkedSpotId] || null])
+            ),
+          };
         });
+        sendJson(res, 200, response);
       } catch (e) {
         sendJson(res, 400, { ok: false, error: e.message });
       }
@@ -158,13 +163,13 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === 'DELETE') {
-      const store = readStore();
-      if (store[depth]) {
-        for (const linkedSpotId of synchronizedSpotIds(spotId)) {
-          delete store[depth][linkedSpotId];
+      await updateStore((store) => {
+        if (store[depth]) {
+          for (const linkedSpotId of synchronizedSpotIds(spotId)) {
+            delete store[depth][linkedSpotId];
+          }
         }
-      }
-      await writeStore(store);
+      });
       sendJson(res, 200, { ok: true });
       return;
     }

@@ -11,7 +11,8 @@ statically. No build step, no bundler, no dependencies.
   - `POST /api/ranges/:depth` — register a vault (creates an empty entry if absent)
   - `PUT /api/ranges/:depth/:spotId` — save a spot's hands (deletes the spot if `hands` is empty)
   - `DELETE /api/ranges/:depth` and `DELETE /api/ranges/:depth/:spotId`
-  - Writes are serialized through a single promise chain (`writeQueue`) so concurrent saves can't corrupt `data/ranges.json`.
+  - Every read-modify-write goes through `updateStore(mutate)`, serialized on one promise chain (`writeQueue`), so concurrent saves can't overwrite each other's changes in `data/ranges.json`.
+- `test/api.test.js` — API tests (`npm test`, Node's built-in runner, no deps); spawns the server on a free port with a temp data file via `RANGE_VAULT_PORT` / `RANGE_VAULT_DATA_FILE`. CI: `.github/workflows/test.yml`.
 - `data/ranges.json` — sole persistence layer. Shape: `{ depthName: { spotId: { hands: {...}, updatedAt } } }`.
 - `public/treeConfig.js` — builds the preflop action tree (positions → open → facing actions → 3bet/4bet/5bet lines).
 - `public/app.js` — all client state/rendering/paint logic.

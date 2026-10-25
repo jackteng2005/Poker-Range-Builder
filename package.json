@@ -1,0 +1,9 @@
+{
+  "name": "range-vault",
+  "private": true,
+  "description": "Preflop poker range builder: plain Node.js server, no dependencies.",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/api.test.js"
+  }
+}
